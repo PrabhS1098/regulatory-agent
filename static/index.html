@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Regulatory Intelligence Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Base tokens ─────────────────────────────────────────────────── */
+    :root {
+      --bg:        #080c14;
+      --surface:   #0d1422;
+      --border:    #1a2540;
+      --accent:    #00d4ff;
+      --accent2:   #7b5ea7;
+      --green:     #00ff9d;
+      --warn:      #ff4f4f;
+      --text:      #c8d6f0;
+      --muted:     #4a5a7a;
+      --font-ui:   'Syne', sans-serif;
+      --font-mono: 'Space Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Scanline overlay ────────────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.08) 2px, rgba(0,0,0,.08) 4px);
+      pointer-events: none; z-index: 9999;
+    }
+
+    /* ── Grid background ─────────────────────────────────────────────── */
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(0,212,255,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    /* ── Node cards ──────────────────────────────────────────────────── */
+    .agent-node {
+      position: relative;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      transition: transform .3s ease;
+    }
+
+    .node-circle {
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      background: var(--surface);
+      transition: border-color .3s, box-shadow .3s, background .3s;
+      cursor: default;
+    }
+
+    .node-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--muted);
+      text-align: center;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      transition: color .3s;
+      max-width: 70px;
+      line-height: 1.3;
+    }
+
+    /* Active state */
+    .agent-node.active .node-circle {
+      border-color: var(--accent);
+      background: rgba(0,212,255,.08);
+      box-shadow: 0 0 0 4px rgba(0,212,255,.15), 0 0 24px rgba(0,212,255,.35);
+    }
+    .agent-node.active .node-label { color: var(--accent); }
+
+    /* Done / success state */
+    .agent-node.done .node-circle {
+      border-color: var(--green);
+      background: rgba(0,255,157,.06);
+      box-shadow: 0 0 12px rgba(0,255,157,.25);
+    }
+    .agent-node.done .node-label { color: var(--green); }
+
+    /* A2A loop warning */
+    .agent-node.loop .node-circle {
+      border-color: var(--warn);
+      background: rgba(255,79,79,.08);
+      animation: loop-flash 1s ease-in-out 3;
+    }
+    .agent-node.loop .node-label { color: var(--warn); }
+
+    @keyframes loop-flash {
+      0%, 100% { box-shadow: 0 0 8px rgba(255,79,79,.3); }
+      50%       { box-shadow: 0 0 28px rgba(255,79,79,.8), 0 0 8px rgba(255,79,79,.5); }
+    }
+
+    /* Pulse ring for active node */
+    .agent-node.active .node-circle::after {
+      content: '';
+      position: absolute;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      animation: pulse-ring 1.4s ease-out infinite;
+    }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(1); opacity: .8; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    /* ── SVG connector lines ─────────────────────────────────────────── */
+    .connector-svg { overflow: visible; }
+    .connector-line {
+      stroke: var(--border);
+      stroke-width: 1.5;
+      fill: none;
+      stroke-dasharray: 4 4;
+      transition: stroke .4s;
+    }
+    .connector-line.active { stroke: var(--accent); animation: dash-flow 1s linear infinite; }
+    .connector-line.loop   { stroke: var(--warn);  animation: dash-flow .6s linear infinite; }
+    .connector-line.done   { stroke: var(--green); }
+
+    @keyframes dash-flow {
+      to { stroke-dashoffset: -16; }
+    }
+
+    /* ── Log entries ─────────────────────────────────────────────────── */
+    .log-entry {
+      animation: slide-in .3s ease;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Prompt area ─────────────────────────────────────────────────── */
+    .prompt-input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      resize: none;
+    }
+    .prompt-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,212,255,.1);
+    }
+    .prompt-input::placeholder { color: var(--muted); }
+
+    /* ── Run button ──────────────────────────────────────────────────── */
+    .run-btn {
+      font-family: var(--font-ui);
+      font-weight: 700;
+      letter-spacing: .08em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #000;
+      border: none;
+      cursor: pointer;
+      transition: opacity .2s, transform .15s;
+    }
+    .run-btn:hover:not(:disabled) { opacity: .85; transform: translateY(-1px); }
+    .run-btn:active:not(:disabled) { transform: translateY(0); }
+    .run-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+    /* ── Status pill ─────────────────────────────────────────────────── */
+    .status-pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid currentColor;
+    }
+    .status-idle     { color: var(--muted);  border-color: var(--border); }
+    .status-running  { color: var(--accent); border-color: var(--accent); animation: pill-glow 1.5s ease-in-out infinite; }
+    .status-done     { color: var(--green);  border-color: var(--green); }
+    .status-error    { color: var(--warn);   border-color: var(--warn); }
+
+    @keyframes pill-glow {
+      0%, 100% { box-shadow: none; }
+      50%       { box-shadow: 0 0 8px rgba(0,212,255,.4); }
+    }
+
+    /* ── Report link card ────────────────────────────────────────────── */
+    .report-card {
+      background: linear-gradient(135deg, rgba(0,255,157,.06), rgba(0,212,255,.04));
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      padding: 12px 16px;
+      animation: slide-in .4s ease;
+    }
+
+    /* ── Thinking spinner ────────────────────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Separator ───────────────────────────────────────────────────── */
+    .h-sep { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+  </style>
+</head>
+
+<body class="grid-bg h-full flex flex-col">
+
+  <!-- ── Top bar ─────────────────────────────────────────────────────────── -->
+  <header class="flex items-center justify-between px-6 py-3 border-b" style="border-color:var(--border); background:rgba(8,12,20,.9); backdrop-filter:blur(10px); flex-shrink:0;">
+    <div class="flex items-center gap-3">
+      <div class="text-2xl">⚖️</div>
+      <div>
+        <div style="font-family:var(--font-ui); font-weight:800; font-size:15px; letter-spacing:.04em; color:#fff;">
+          REGULATORY INTELLIGENCE
+        </div>
+        <div style="font-family:var(--font-mono); font-size:9px; color:var(--muted); letter-spacing:.12em;">
+          AUTONOMOUS MULTI-AGENT SYSTEM · LANGGRAPH
+        </div>
+      </div>
+    </div>
+    <div id="statusPill" class="status-pill status-idle">IDLE</div>
+  </header>
+
+  <!-- ── Main layout ──────────────────────────────────────────────────────── -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- ── LEFT: Agent topology panel ────────────────────────────────────── -->
+    <aside class="flex flex-col border-r" style="width:220px; min-width:220px; border-color:var(--border); background:rgba(13,20,34,.7); backdrop-filter:blur(8px); flex-shrink:0;">
+      <div class="px-4 pt-4 pb-2">
+        <div style="font-family:var(--font-mono); font-size:9px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase;">
+          Graph Topology
+        </div>
+      </div>
+
+      <!-- Node graph (SVG + HTML overlay) -->
+      <div class="flex-1 flex items-center justify-center px-4 py-2">
+        <div class="relative w-full" style="height:340px;">
+
+          <!-- SVG connector lines -->
+          <svg class="connector-svg absolute inset-0 w-full h-full" style="z-index:0;" viewBox="0 0 160 340" preserveAspectRatio="xMidYMid meet">
+            <!-- Supervisor → Policy RAG -->
+            <path id="line-supervisor-policy_rag" class="connector-line" d="M 80 62 L 80 102" />
+            <!-- Supervisor → Data Analyst -->
+            <path id="line-supervisor-data_analyst" class="connector-line" d="M 80 62 Q 130 82 130 122" />
+            <!-- Policy RAG → Synthesis -->
+            <path id="line-policy_rag-synthesis" class="connector-line" d="M 80 152 L 80 192" />
+            <!-- Data Analyst → Synthesis -->
+            <path id="line-data_analyst-synthesis" class="connector-line" d="M 130 172 Q 130 212 80 212" />
+            <!-- Synthesis → Data Analyst (A2A loop) -->
+            <path id="line-synthesis-data_analyst" class="connector-line" d="M 96 202 Q 160 180 130 148" />
+            <!-- Synthesis → Report Writer -->
+            <path id="line-synthesis-report_writer" class="connector-line" d="M 80 222 L 80 268" />
+          </svg>
+
+          <!-- Node: Supervisor (top center) -->
+          <div id="node-supervisor" class="agent-node absolute" style="left:50%; top:10px; transform:translateX(-50%); z-index:1;">
+            <div class="node-circle">🧠</div>
+            <div class="node-label">Supervisor</div>
+          </div>
+
+          <!-- Node: Policy RAG (left-center) -->
+          <div id="node-policy_rag" class="agent-node absolute" style="left:10px; top:100px; z-index:1;">
+            <div class="node-circle">📚</div>
+            <div class="node-label">Policy RAG</div>
+          </div>
+
+          <!-- Node: Data Analyst (right-center) -->
+          <div id="node-data_analyst" class="agent-node absolute" style="right:8px; top:120px; z-index:1;">
+            <div class="node-circle">📊</div>
+            <div class="node-label">Data Analyst</div>
+          </div>
+
+          <!-- Node: Synthesis (center) -->
+          <div id="node-synthesis" class="agent-node absolute" style="left:50%; top:192px; transform:translateX(-50%); z-index:1;">
+            <div class="node-circle">⚗️</div>
+            <div class="node-label">Synthesis</div>
+          </div>
+
+          <!-- Node: Report Writer (bottom center) -->
+          <div id="node-report_writer" class="agent-node absolute" style="left:50%; top:268px; transform:translateX(-50%); z-index:1;">
+            <div class="node-circle">📝</div>
+            <div class="node-label">Report Writer</div>
+          </div>
+
+          <!-- A2A Loop badge -->
+          <div id="loopBadge" class="absolute" style="right:2px; top:185px; display:none; z-index:2;">
+            <div style="background:rgba(255,79,79,.15); border:1px solid var(--warn); border-radius:4px; padding:2px 5px; font-family:var(--font-mono); font-size:8px; color:var(--warn); letter-spacing:.05em;">A2A</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="px-4 pb-4 space-y-2">
+        <hr class="h-sep"/>
+        <div style="font-family:var(--font-mono); font-size:9px; letter-spacing:.1em; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">Legend</div>
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full" style="background:rgba(0,212,255,.3); border:1px solid var(--accent);"></div>
+          <span style="font-family:var(--font-mono); font-size:9px; color:var(--muted);">Running</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full" style="background:rgba(0,255,157,.3); border:1px solid var(--green);"></div>
+          <span style="font-family:var(--font-mono); font-size:9px; color:var(--muted);">Complete</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full" style="background:rgba(255,79,79,.3); border:1px solid var(--warn);"></div>
+          <span style="font-family:var(--font-mono); font-size:9px; color:var(--muted);">A2A Loop</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── RIGHT: Chat + Log panel ───────────────────────────────────────── -->
+    <main class="flex flex-col flex-1 overflow-hidden">
+
+      <!-- Log window -->
+      <div id="logWindow" class="flex-1 overflow-y-auto px-6 py-5 space-y-3" style="background:transparent;">
+        <!-- Welcome splash -->
+        <div id="welcomeMsg" class="flex flex-col items-center justify-center h-full" style="min-height:200px;">
+          <div style="font-size:48px; margin-bottom:16px; opacity:.4;">⚖️</div>
+          <div style="font-family:var(--font-ui); font-size:18px; font-weight:700; color:var(--muted); text-align:center; letter-spacing:.04em;">
+            Regulatory Intelligence Agent
+          </div>
+          <div style="font-family:var(--font-mono); font-size:11px; color:var(--border); margin-top:8px; text-align:center;">
+            Submit a query below to activate the agent graph
+          </div>
+        </div>
+      </div>
+
+      <!-- Input bar -->
+      <div class="border-t px-5 py-4" style="border-color:var(--border); background:rgba(8,12,20,.85); backdrop-filter:blur(10px); flex-shrink:0;">
+        <div class="flex gap-3 items-end">
+          <textarea
+            id="promptInput"
+            class="prompt-input flex-1 rounded-lg px-4 py-3"
+            rows="2"
+            placeholder="e.g. Analyse Q3 compliance exposure for Basel III Pillar 2 requirements…"
+          ></textarea>
+          <button id="runBtn" class="run-btn rounded-lg px-5 py-3 text-sm" style="height:fit-content; min-width:90px;">
+            RUN ▶
+          </button>
+        </div>
+        <div class="flex items-center justify-between mt-2">
+          <span style="font-family:var(--font-mono); font-size:9px; color:var(--muted);">SHIFT+ENTER for new line · ENTER to run</span>
+          <span id="nodeCounter" style="font-family:var(--font-mono); font-size:9px; color:var(--muted);"></span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── JavaScript ──────────────────────────────────────────────────────── -->
+  <script>
+  (() => {
+    // ── DOM refs ──────────────────────────────────────────────────────────
+    const promptInput  = document.getElementById('promptInput');
+    const runBtn       = document.getElementById('runBtn');
+    const logWindow    = document.getElementById('logWindow');
+    const statusPill   = document.getElementById('statusPill');
+    const nodeCounter  = document.getElementById('nodeCounter');
+    const welcomeMsg   = document.getElementById('welcomeMsg');
+    const loopBadge    = document.getElementById('loopBadge');
+
+    // ── State ─────────────────────────────────────────────────────────────
+    let activeEventSource = null;
+    let nodesRun = 0;
+    let prevNode = null;
+
+    // ── Node metadata ─────────────────────────────────────────────────────
+    const NODE_META = {
+      supervisor:    { emoji: '🧠', label: 'Supervisor',    color: 'var(--accent)' },
+      policy_rag:    { emoji: '📚', label: 'Policy RAG',    color: 'var(--accent)' },
+      data_analyst:  { emoji: '📊', label: 'Data Analyst',  color: 'var(--accent)' },
+      synthesis:     { emoji: '⚗️', label: 'Synthesis',     color: 'var(--accent)' },
+      report_writer: { emoji: '📝', label: 'Report Writer', color: 'var(--accent)' },
+      error:         { emoji: '❌', label: 'Error',         color: 'var(--warn)'   },
+    };
+
+    // Edges to animate when a node is running
+    const EDGE_MAP = {
+      supervisor:    ['line-supervisor-policy_rag', 'line-supervisor-data_analyst'],
+      policy_rag:    ['line-policy_rag-synthesis'],
+      data_analyst:  ['line-data_analyst-synthesis'],
+      synthesis:     ['line-synthesis-report_writer'],
+      report_writer: [],
+    };
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    function setStatus(state) {
+      statusPill.className = `status-pill status-${state}`;
+      const labels = { idle: 'IDLE', running: 'RUNNING', done: 'DONE', error: 'ERROR' };
+      statusPill.textContent = labels[state] || state.toUpperCase();
+    }
+
+    function clearNodeStates() {
+      document.querySelectorAll('.agent-node').forEach(n => n.classList.remove('active', 'done', 'loop'));
+      document.querySelectorAll('.connector-line').forEach(l => l.classList.remove('active', 'done', 'loop'));
+      loopBadge.style.display = 'none';
+    }
+
+    function activateNode(nodeName) {
+      // Deactivate previous — mark as done
+      if (prevNode && prevNode !== nodeName) {
+        const prevEl = document.getElementById(`node-${prevNode}`);
+        if (prevEl) { prevEl.classList.remove('active'); prevEl.classList.add('done'); }
+        // Mark edges done
+        (EDGE_MAP[prevNode] || []).forEach(id => {
+          const line = document.getElementById(id);
+          if (line) { line.classList.remove('active', 'loop'); line.classList.add('done'); }
+        });
+      }
+
+      const el = document.getElementById(`node-${nodeName}`);
+      if (!el) return;
+
+      // A2A detection: synthesis re-routes to data_analyst
+      const isA2A = (nodeName === 'data_analyst' && prevNode === 'synthesis');
+
+      if (isA2A) {
+        el.classList.remove('active', 'done');
+        el.classList.add('loop');
+        const loopLine = document.getElementById('line-synthesis-data_analyst');
+        if (loopLine) { loopLine.classList.add('loop'); }
+        loopBadge.style.display = 'block';
+        // After animation, go back to active
+        setTimeout(() => {
+          el.classList.remove('loop');
+          el.classList.add('active');
+          if (loopLine) { loopLine.classList.remove('loop'); loopLine.classList.add('active'); }
+        }, 3200);
+      } else {
+        el.classList.remove('done', 'loop');
+        el.classList.add('active');
+        (EDGE_MAP[nodeName] || []).forEach(id => {
+          const line = document.getElementById(id);
+          if (line) { line.classList.remove('done', 'loop'); line.classList.add('active'); }
+        });
+      }
+
+      prevNode = nodeName;
+    }
+
+    function markAllDone() {
+      document.querySelectorAll('.agent-node').forEach(n => {
+        if (n.classList.contains('active') || n.classList.contains('loop')) {
+          n.classList.remove('active', 'loop');
+          n.classList.add('done');
+        }
+      });
+      document.querySelectorAll('.connector-line').forEach(l => {
+        if (l.classList.contains('active') || l.classList.contains('loop')) {
+          l.classList.remove('active', 'loop');
+          l.classList.add('done');
+        }
+      });
+    }
+
+    function appendLog(node, content, isError = false, isSql = false) {
+      const meta = NODE_META[node] || { emoji: '⚙️', label: node, color: 'var(--text)' };
+
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+
+      const headerColor = isError ? 'var(--warn)' : isSql ? '#f0a500' : meta.color;
+
+      entry.innerHTML = `
+        <div class="flex items-start gap-3">
+          <div style="flex-shrink:0; margin-top:2px;">
+            <span style="font-size:16px;">${meta.emoji}</span>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="flex items-center gap-2 mb-1">
+              <span style="font-family:var(--font-mono); font-size:10px; font-weight:700; color:${headerColor}; text-transform:uppercase; letter-spacing:.1em;">
+                ${meta.label}
+              </span>
+              <span style="font-family:var(--font-mono); font-size:9px; color:var(--muted);">
+                ${new Date().toLocaleTimeString()}
+              </span>
+              ${isSql ? '<span style="font-family:var(--font-mono);font-size:8px;color:#f0a500;border:1px solid #f0a500;border-radius:3px;padding:1px 4px;">SQL ERR</span>' : ''}
+              ${isError ? '<span style="font-family:var(--font-mono);font-size:8px;color:var(--warn);border:1px solid var(--warn);border-radius:3px;padding:1px 4px;">FATAL</span>' : ''}
+            </div>
+            <div style="color:${isError || isSql ? headerColor : 'var(--text)'}; font-size:12px; line-height:1.6; word-break:break-word; white-space:pre-wrap;">${escapeHtml(content)}</div>
+          </div>
+        </div>
+      `;
+
+      logWindow.appendChild(entry);
+      logWindow.scrollTop = logWindow.scrollHeight;
+    }
+
+    function appendUserPrompt(prompt) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `
+        <div style="background:rgba(123,94,167,.1); border:1px solid rgba(123,94,167,.3); border-radius:8px; padding:12px 16px;">
+          <div style="font-family:var(--font-mono); font-size:9px; color:var(--accent2); text-transform:uppercase; letter-spacing:.12em; margin-bottom:6px;">
+            👤 User Query
+          </div>
+          <div style="font-size:13px; font-weight:600; color:#fff; line-height:1.5; white-space:pre-wrap;">${escapeHtml(prompt)}</div>
+        </div>
+      `;
+      logWindow.appendChild(entry);
+      logWindow.scrollTop = logWindow.scrollHeight;
+    }
+
+    function appendThinking(nodeName) {
+      const existing = document.getElementById('thinkingIndicator');
+      if (existing) existing.remove();
+
+      const meta = NODE_META[nodeName] || { emoji: '⚙️', label: nodeName };
+      const el = document.createElement('div');
+      el.id = 'thinkingIndicator';
+      el.className = 'log-entry';
+      el.innerHTML = `
+        <div style="color:var(--muted); font-size:11px; display:flex; align-items:center;">
+          <span class="spinner"></span>
+          <span>${meta.emoji} ${meta.label} is processing…</span>
+        </div>
+      `;
+      logWindow.appendChild(el);
+      logWindow.scrollTop = logWindow.scrollHeight;
+    }
+
+    function removeThinking() {
+      const el = document.getElementById('thinkingIndicator');
+      if (el) el.remove();
+    }
+
+    function appendReportLink(reportPath) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `
+        <div class="report-card">
+          <div style="font-family:var(--font-mono); font-size:9px; color:var(--green); text-transform:uppercase; letter-spacing:.12em; margin-bottom:8px;">
+            ✅ Report Generated
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:20px;">📄</span>
+            <div>
+              <div style="font-size:13px; font-weight:600; color:#fff;">${escapeHtml(reportPath)}</div>
+              <a href="/static/${escapeHtml(reportPath)}" target="_blank" style="font-family:var(--font-mono); font-size:10px; color:var(--green); text-decoration:none; letter-spacing:.06em;">
+                OPEN REPORT ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      `;
+      logWindow.appendChild(entry);
+      logWindow.scrollTop = logWindow.scrollHeight;
+    }
+
+    function appendDivider(label) {
+      const el = document.createElement('div');
+      el.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px; padding:4px 0;">
+          <div style="flex:1; height:1px; background:var(--border);"></div>
+          <span style="font-family:var(--font-mono); font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em;">${label}</span>
+          <div style="flex:1; height:1px; background:var(--border);"></div>
+        </div>
+      `;
+      logWindow.appendChild(el);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;');
+    }
+
+    // ── Main run function ─────────────────────────────────────────────────
+    function runAgent() {
+      const prompt = promptInput.value.trim();
+      if (!prompt) return;
+      if (activeEventSource) { activeEventSource.close(); activeEventSource = null; }
+
+      // Reset UI
+      welcomeMsg.remove && welcomeMsg.parentNode && welcomeMsg.parentNode.removeChild(welcomeMsg);
+      clearNodeStates();
+      prevNode = null;
+      nodesRun = 0;
+      nodeCounter.textContent = '';
+
+      runBtn.disabled = true;
+      promptInput.disabled = true;
+      setStatus('running');
+
+      appendDivider('NEW QUERY');
+      appendUserPrompt(prompt);
+
+      // POST → get SSE
+      fetch('/api/run_agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      }).then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function processStream({ done, value }) {
+          if (done) {
+            removeThinking();
+            markAllDone();
+            setStatus('done');
+            runBtn.disabled = false;
+            promptInput.disabled = false;
+            return;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop(); // keep incomplete tail
+          parts.forEach(part => {
+            if (!part.startsWith('data:')) return;
+            const raw = part.replace(/^data:\s*/, '');
+            if (!raw) return;
+            try {
+              const payload = JSON.parse(raw);
+              handlePayload(payload);
+            } catch (e) { /* ignore parse errors */ }
+          });
+          reader.read().then(processStream).catch(onStreamError);
+        }
+
+        reader.read().then(processStream).catch(onStreamError);
+      }).catch(onStreamError);
+    }
+
+    function handlePayload(payload) {
+      const { node, content, sql_error, report, done } = payload;
+
+      if (done) {
+        removeThinking();
+        markAllDone();
+        setStatus('done');
+        runBtn.disabled = false;
+        promptInput.disabled = false;
+        appendDivider('COMPLETE');
+        return;
+      }
+
+      nodesRun++;
+      nodeCounter.textContent = `${nodesRun} node${nodesRun > 1 ? 's' : ''} run`;
+
+      if (node === 'error') {
+        removeThinking();
+        appendLog('error', content || 'Unknown error', true);
+        setStatus('error');
+        runBtn.disabled = false;
+        promptInput.disabled = false;
+        return;
+      }
+
+      removeThinking();
+      activateNode(node);
+
+      if (sql_error) {
+        appendLog(node, sql_error, false, true);
+      }
+      if (content) {
+        appendLog(node, content);
+      }
+      if (report) {
+        appendReportLink(report);
+      }
+
+      appendThinking(node);
+    }
+
+    function onStreamError(err) {
+      removeThinking();
+      appendLog('error', `Connection error: ${err.message}`, true);
+      setStatus('error');
+      runBtn.disabled = false;
+      promptInput.disabled = false;
+    }
+
+    // ── Event bindings ────────────────────────────────────────────────────
+    runBtn.addEventListener('click', runAgent);
+
+    promptInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        runAgent();
+      }
+    });
+
+  })();
+  </script>
+</body>
+</html>
