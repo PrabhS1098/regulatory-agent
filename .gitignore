@@ -4,3 +4,4 @@ __pycache__/
 *.db
 workspace/
 data/chroma_db/
+venv/
